@@ -354,10 +354,11 @@ def main():
                     print(f"  ✅ SUCCESS: Moved to '{folder_name}/{new_filename}'")
                 else:
                     try:
-                        print(f"  - INFO: Duplicate found. Replacing existing file in '{folder_name}'.")
-                        os.remove(full_path)
-                        os.rename(filename, full_path)
-                        print(f"  ✅ SUCCESS: Replaced old file and moved to '{folder_name}/{new_filename}'")
+                        print(f"  🔄 DUPLICATE FOUND: Exact duplicate exists in '{folder_name}'.")
+                        print(f"  🗑️ DELETING OLD FILE: Removing existing '{new_filename}'")
+                        os.remove(full_path)  # Delete the old file first
+                        os.rename(filename, full_path)  # Move the new file
+                        print(f"  ✅ SUCCESS: Kept newer file and moved to '{folder_name}/{new_filename}'")
                     except OSError as e:
                         print(f"    - Error during replacement: {e}")
             else:
