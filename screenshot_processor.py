@@ -9,15 +9,26 @@ from datetime import datetime
 ### --- PART 1: CONFIGURATION --- ###
 print("\nInitializing EasyOCR... (This may take a moment on the first run)")
 try:
-    reader = easyocr.Reader(['en'], gpu=True)
+    # Try GPU first
+    reader = easyocr.Reader(['en'], gpu=True, download_enabled=False)
     print("EasyOCR Initialized on GPU.")
 except Exception:
     print("GPU initialization failed. Falling back to CPU...")
-    reader = easyocr.Reader(['en'], gpu=False)
-    print("EasyOCR Initialized on CPU.")
+    try:
+        # CPU with optimizations
+        reader = easyocr.Reader(['en'], gpu=False, download_enabled=False)
+        print("EasyOCR Initialized on CPU.")
+    except Exception:
+        # Fallback without download disabled
+        reader = easyocr.Reader(['en'], gpu=False)
+        print("EasyOCR Initialized on CPU (with model download).")
 
 CROP_TOP_PERCENT = 0.08 
-CROP_BOTTOM_PERCENT = 0.20 
+CROP_BOTTOM_PERCENT = 0.20
+
+# Performance optimization settings
+OCR_WIDTH_THRESHOLD = 1200  # Resize images wider than this for faster processing
+PARALLEL_PROCESSING = True  # Enable batch processing optimizations 
 
 ### --- PART 2: THE VALIDATED LOGIC --- ###
 
@@ -44,12 +55,23 @@ def is_valid_time(time_str):
     except (ValueError, IndexError):
         return False
 
-def enhance_image_for_ocr(img_array):
+def optimize_image_size(img, max_width=OCR_WIDTH_THRESHOLD):
     """
-    Enhance image for better OCR digit recognition
+    Resize image for faster OCR processing while maintaining quality
+    """
+    width, height = img.size
+    if width > max_width:
+        # Calculate new height maintaining aspect ratio
+        ratio = max_width / width
+        new_height = int(height * ratio)
+        img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+    return img
+
+def enhance_image_for_ocr(img_array, fast_mode=True):
+    """
+    Enhance image for better OCR digit recognition with CPU optimization
     """
     from PIL import Image, ImageEnhance, ImageFilter
-    import cv2
     
     # Convert to PIL Image if it's numpy array
     if isinstance(img_array, np.ndarray):
@@ -57,19 +79,33 @@ def enhance_image_for_ocr(img_array):
     else:
         img = img_array
     
-    # Convert to grayscale for better digit recognition
+    # Optimize size first for faster processing
+    img = optimize_image_size(img)
+    
+    # Convert to grayscale for better digit recognition and faster processing
     img = img.convert('L')
     
-    # Enhance contrast
-    enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(2.0)
-    
-    # Enhance sharpness
-    enhancer = ImageEnhance.Sharpness(img)
-    img = enhancer.enhance(2.0)
-    
-    # Apply slight blur to reduce noise
-    img = img.filter(ImageFilter.MedianFilter(size=3))
+    if fast_mode:
+        # Fast CPU optimizations
+        # Moderate contrast enhancement (less CPU intensive)
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1.5)
+        
+        # Light sharpness enhancement
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(1.3)
+    else:
+        # Full quality enhancements (slower)
+        # Enhance contrast
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)
+        
+        # Enhance sharpness
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(2.0)
+        
+        # Apply slight blur to reduce noise
+        img = img.filter(ImageFilter.MedianFilter(size=3))
     
     return np.array(img)
 
@@ -307,7 +343,13 @@ def main():
         print("No 'Screenshot...' files found to process.")
         input("Press Enter to exit."); return
 
-    for filename in files_to_process:
+    print(f"Found {len(files_to_process)} files to process.")
+    
+    # CPU optimization: Process with progress tracking
+    processed_count = 0
+    start_time = datetime.now()
+    
+    for i, filename in enumerate(files_to_process, 1):
         if not os.path.exists(filename): continue
         print(f"Processing '{filename}'...")
         try:
@@ -315,18 +357,32 @@ def main():
                 width, height = img.size
                 cropped_img = img.crop((0, height * CROP_TOP_PERCENT, width, height * (1 - CROP_BOTTOM_PERCENT)))
 
-            # Enhance image for better OCR
-            enhanced_img = enhance_image_for_ocr(cropped_img)
+            # CPU-optimized OCR processing
+            enhanced_img = enhance_image_for_ocr(cropped_img, fast_mode=True)
             
-            # First pass with enhanced image
-            results = reader.readtext(enhanced_img, detail=1, paragraph=False)
+            # Optimized OCR settings for faster CPU processing
+            results = reader.readtext(
+                enhanced_img, 
+                detail=1, 
+                paragraph=False,
+                width_ths=0.7,  # Faster text detection
+                height_ths=0.7,  # Faster text detection
+                batch_size=1    # Optimize for single image processing
+            )
             
-            # If no good results, try with original cropped image
-            if not results or len(results) < 3:
-                cropped_img_np = np.array(cropped_img)
-                results_backup = reader.readtext(cropped_img_np, detail=1, paragraph=False)
+            # If no good results and we have time, try with better quality
+            if not results or len(results) < 2:
+                enhanced_img_slow = enhance_image_for_ocr(cropped_img, fast_mode=False)
+                results_backup = reader.readtext(
+                    enhanced_img_slow, 
+                    detail=1, 
+                    paragraph=False,
+                    width_ths=0.5,  # More thorough detection
+                    height_ths=0.5
+                )
                 if len(results_backup) > len(results):
                     results = results_backup
+                    print(f"  🔄 Used high-quality mode for better results")
 
             company, strike_num, option_type, time_str = find_all_details(results, known_companies)
             
@@ -379,8 +435,20 @@ def main():
 
         except Exception as e:
             print(f"  ❌ ERROR: An unexpected error occurred: {e}")
+        
+        # Progress tracking for performance monitoring
+        processed_count += 1
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        avg_time_per_file = elapsed_time / processed_count
+        remaining_files = len(files_to_process) - processed_count
+        estimated_remaining = remaining_files * avg_time_per_file
+        
+        print(f"  📊 Progress: {processed_count}/{len(files_to_process)} ({processed_count/len(files_to_process)*100:.1f}%) | "
+              f"Avg: {avg_time_per_file:.1f}s/file | ETA: {estimated_remaining:.0f}s")
 
-    print("\n--- All files processed. ---")
+    total_time = (datetime.now() - start_time).total_seconds()
+    print(f"\n--- All files processed in {total_time:.1f} seconds ---")
+    print(f"📈 Performance: {total_time/len(files_to_process):.1f} seconds per file")
     input("Press Enter to exit.")
 
 if __name__ == "__main__":

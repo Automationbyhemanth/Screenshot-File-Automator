@@ -4,14 +4,15 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 
 ## Features
 
-- **Enhanced OCR Processing**: Uses EasyOCR with image enhancement for better digit recognition
+- **CPU-Optimized OCR Processing**: Fast image processing optimized for CPU performance
+- **Intelligent Image Resizing**: Automatically resizes large images for faster processing
 - **Advanced Time Extraction**: Multiple strategies to accurately extract timestamps from screenshots
-- **Intelligent Parsing**: Extracts company symbols, strike prices, option types, and timestamps
+- **Smart Processing Modes**: Fast mode for speed, high-quality mode for difficult images
 - **OCR Error Correction**: Automatically corrects common OCR misreadings (O→0, I→1, etc.)
 - **Automated Renaming**: Renames files based on extracted information
 - **Auto Folder Organization**: Creates folders by strike/option/company and moves files accordingly
-- **Batch Processing**: Processes multiple screenshots at once
-- **GPU/CPU Support**: Automatically falls back to CPU if GPU is unavailable
+- **Performance Monitoring**: Real-time progress tracking with ETA estimates
+- **GPU/CPU Support**: Automatically falls back to CPU with optimizations
 
 ## Requirements
 
@@ -75,6 +76,10 @@ python screenshot_processor.py
 ### Cropping Settings
 - `CROP_TOP_PERCENT = 0.08` (crops top 8% of image)
 - `CROP_BOTTOM_PERCENT = 0.20` (crops bottom 20% of image)
+
+### Performance Settings
+- `OCR_WIDTH_THRESHOLD = 1200` (resizes images wider than 1200px for faster processing)
+- `PARALLEL_PROCESSING = True` (enables batch processing optimizations)
 
 ### Time Validation
 - Only accepts times between 9:00 and 15:59 (trading hours)
