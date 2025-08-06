@@ -4,7 +4,6 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 
 ## Features
 
-- **License Verification**: Secure license checking via Google Sheets
 - **OCR Processing**: Uses EasyOCR for text extraction from screenshots
 - **Intelligent Parsing**: Extracts company symbols, strike prices, option types, and timestamps
 - **Automated Renaming**: Renames files based on extracted information
@@ -15,7 +14,6 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 
 - Python 3.7+
 - Required Python packages (see `requirements.txt`)
-- Google Service Account credentials (`Screenshot-access.json`)
 - Company symbols list (`companies.txt`)
 
 ## Installation
@@ -25,18 +23,7 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 pip install -r requirements.txt
 ```
 
-2. Set up Google Sheets API:
-   - Create a Google Service Account
-   - Download the JSON credentials file
-   - Rename it to `Screenshot-access.json`
-   - Place it in the same directory as the script
-
-3. Create a Google Sheet named "Screenshot License Access" with columns:
-   - Name
-   - Email
-   - License Key
-
-4. Share the Google Sheet with the client_email from your JSON credentials file
+2. Ensure you have the `companies.txt` file with stock symbols you want to detect
 
 ## Usage
 
@@ -48,7 +35,6 @@ python screenshot_processor.py
 ```
 
 4. Follow the prompts:
-   - Enter your license credentials
    - Enter the date for the batch processing
    - The script will process all screenshot files automatically
 
@@ -58,21 +44,19 @@ python screenshot_processor.py
 ├── screenshot_processor.py    # Main script
 ├── requirements.txt          # Python dependencies
 ├── companies.txt            # List of company symbols to detect
-├── Screenshot-access.json   # Google API credentials (you need to create this)
 └── README.md               # This file
 ```
 
 ## How It Works
 
-1. **License Verification**: Connects to Google Sheets to verify user credentials
-2. **Image Processing**: Crops screenshots to focus on relevant areas
-3. **OCR Extraction**: Uses EasyOCR to extract text from images
-4. **Pattern Matching**: Searches for:
+1. **Image Processing**: Crops screenshots to focus on relevant areas
+2. **OCR Extraction**: Uses EasyOCR to extract text from images
+3. **Pattern Matching**: Searches for:
    - Company symbols (from `companies.txt`)
    - Strike prices (3-6 digit numbers)
    - Option types (CE/PE)
    - Timestamps (HH:MM format between 9:00-15:59)
-5. **File Renaming**: Renames files to format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
+4. **File Renaming**: Renames files to format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
 
 ## Configuration
 
@@ -96,22 +80,16 @@ To create a standalone executable with PyInstaller:
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --add-data "Screenshot-access.json;." --add-data "companies.txt;." screenshot_processor.py
+pyinstaller --onefile --add-data "companies.txt;." screenshot_processor.py
 ```
-
-## Security Notes
-
-- License verification prevents unauthorized usage
-- Google API credentials should be kept secure
-- The script requires internet access for license verification
 
 ## Troubleshooting
 
 1. **GPU Issues**: Script automatically falls back to CPU if GPU initialization fails
 2. **Missing Dependencies**: Install all packages from `requirements.txt`
-3. **Google Sheets Access**: Ensure the sheet is shared with your service account email
-4. **OCR Accuracy**: Adjust cropping percentages if OCR is missing information
+3. **OCR Accuracy**: Adjust cropping percentages if OCR is missing information
+4. **Company Detection**: Update `companies.txt` with the stock symbols you need to detect
 
 ## Support
 
-For technical support or license issues, contact the script administrator.
+For technical support, refer to the documentation or modify the script as needed.

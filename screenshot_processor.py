@@ -6,13 +6,7 @@ from PIL import Image
 import numpy as np
 from datetime import datetime
 
-# --- LIBRARIES FOR LICENSE VERIFICATION ---
-try:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-except ImportError:
-    print("ERROR: 'gspread' or 'oauth2client' not found. Please run: pip install gspread oauth2client")
-    sys.exit()
+# --- REMOVED LICENSE VERIFICATION LIBRARIES ---
 
 ### --- RESOURCE PATH HELPER (for making the script an executable .exe) --- ###
 def resource_path(relative_path):
@@ -23,47 +17,7 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-### --- LICENSE VERIFICATION FUNCTION --- ###
-def verify_license():
-    """
-    Connects to Google Sheets to verify the user's Name, Email, and License Key.
-    """
-    print("\n🔐 License Verification Required")
-    name = input("Enter your Name: ").strip()
-    email = input("Enter your Email: ").strip()
-    license_key = input("Enter your License Key: ").strip()
-
-    try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        json_keyfile_path = resource_path("Screenshot-access.json")
-        if not os.path.exists(json_keyfile_path):
-            print(f"❌ FATAL ERROR: The license credentials file 'Screenshot-access.json' was not found.")
-            return False
-
-        creds = ServiceAccountCredentials.from_json_keyfile_name(json_keyfile_path, scope)
-        client = gspread.authorize(creds)
-        
-        sheet = client.open("Screenshot License Access").sheet1
-        records = sheet.get_all_records()
-
-        for row in records:
-            if row.get("Name","").strip().lower() == name.lower() and \
-               row.get("Email","").strip().lower() == email.lower() and \
-               row.get("License Key","").strip() == license_key:
-                
-                print("✅ License Verified!")
-                return True
-
-        print("❌ Access Denied: License details not found or do not match.")
-        return False
-
-    except gspread.exceptions.SpreadsheetNotFound:
-        print("❌ FATAL ERROR: The Google Sheet named 'Screenshot License Access' was not found.")
-        print("   Please ensure the sheet exists and is shared with the client_email from your JSON file.")
-        return False
-    except Exception as e:
-        print(f"❌ An error occurred during license verification: {e}")
-        return False
+### --- LICENSE VERIFICATION REMOVED --- ###
 
 ### --- PART 1: CONFIGURATION --- ###
 print("\nInitializing EasyOCR... (This may take a moment on the first run)")
@@ -127,13 +81,8 @@ def find_all_details(ocr_results, known_companies):
 
 ### --- MAIN EXECUTION BLOCK --- ###
 def main():
-    print("\n--- Secure Automated Batch Processor ---")
+    print("\n--- Automated Batch Processor ---")
     
-    # --- LICENSE CHECK AT THE START ---
-    if not verify_license():
-        input("Press Enter to exit.")
-        return
-
     print("\n--- Starting File Processing ---")
     if not os.path.exists("companies.txt"):
         print("ERROR: The 'companies.txt' file was not found in this folder.")
