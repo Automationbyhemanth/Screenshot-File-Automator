@@ -4,8 +4,10 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 
 ## Features
 
-- **OCR Processing**: Uses EasyOCR for text extraction from screenshots
+- **Enhanced OCR Processing**: Uses EasyOCR with image enhancement for better digit recognition
+- **Advanced Time Extraction**: Multiple strategies to accurately extract timestamps from screenshots
 - **Intelligent Parsing**: Extracts company symbols, strike prices, option types, and timestamps
+- **OCR Error Correction**: Automatically corrects common OCR misreadings (O→0, I→1, etc.)
 - **Automated Renaming**: Renames files based on extracted information
 - **Auto Folder Organization**: Creates folders by strike/option/company and moves files accordingly
 - **Batch Processing**: Processes multiple screenshots at once
@@ -52,15 +54,21 @@ python screenshot_processor.py
 
 ## How It Works
 
-1. **Image Processing**: Crops screenshots to focus on relevant areas
-2. **OCR Extraction**: Uses EasyOCR to extract text from images
-3. **Pattern Matching**: Searches for:
+1. **Image Processing**: Crops screenshots to focus on relevant areas (removes top 8% and bottom 20%)
+2. **Image Enhancement**: Applies contrast enhancement, sharpening, and noise reduction for better OCR
+3. **Dual OCR Processing**: Runs OCR on both enhanced and original images, uses best results
+4. **Advanced Time Extraction**: Uses multiple strategies:
+   - Pattern matching with different separators (:, ;, .)
+   - Character correction for common OCR errors (O→0, I→1, S→5, etc.)
+   - Separated number detection (e.g., "14 30" as "14:30")
+   - Confidence-based selection of best time match
+5. **Pattern Matching**: Searches for:
    - Company symbols (from `companies.txt`)
-   - Strike prices (3-6 digit numbers)
+   - Strike prices (3-6 digit numbers) with OCR corrections
    - Option types (CE/PE)
    - Timestamps (HH:MM format between 9:00-15:59)
-4. **Folder Creation**: Creates folders named: `{Strike} {OptionType} {Company}` (e.g., "400 PE PFC", "5100 CE ABB")
-5. **File Organization**: Renames and moves files to appropriate folders with format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
+6. **Folder Creation**: Creates folders named: `{Strike} {OptionType} {Company}` (e.g., "400 PE PFC", "5100 CE ABB")
+7. **File Organization**: Renames and moves files to appropriate folders with format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
 
 ## Configuration
 

@@ -27,7 +27,16 @@ def is_valid_time(time_str):
     This will reject misreadings like '71;50'.
     """
     try:
-        hour, minute = map(int, time_str.split(';'))
+        # Handle different separators
+        if ';' in time_str:
+            hour, minute = map(int, time_str.split(';'))
+        elif ':' in time_str:
+            hour, minute = map(int, time_str.split(':'))
+        elif '.' in time_str:
+            hour, minute = map(int, time_str.split('.'))
+        else:
+            return False
+            
         if 9 <= hour <= 15 and 0 <= minute <= 59:
             return True
         else:
@@ -35,20 +44,136 @@ def is_valid_time(time_str):
     except (ValueError, IndexError):
         return False
 
+def enhance_image_for_ocr(img_array):
+    """
+    Enhance image for better OCR digit recognition
+    """
+    from PIL import Image, ImageEnhance, ImageFilter
+    import cv2
+    
+    # Convert to PIL Image if it's numpy array
+    if isinstance(img_array, np.ndarray):
+        img = Image.fromarray(img_array)
+    else:
+        img = img_array
+    
+    # Convert to grayscale for better digit recognition
+    img = img.convert('L')
+    
+    # Enhance contrast
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(2.0)
+    
+    # Enhance sharpness
+    enhancer = ImageEnhance.Sharpness(img)
+    img = enhancer.enhance(2.0)
+    
+    # Apply slight blur to reduce noise
+    img = img.filter(ImageFilter.MedianFilter(size=3))
+    
+    return np.array(img)
+
+def extract_time_advanced(ocr_results):
+    """
+    Advanced time extraction with multiple strategies
+    """
+    found_times = []
+    
+    # Strategy 1: Look for time patterns in individual text blocks
+    for result in ocr_results:
+        text = result[1].upper().strip()
+        
+        # Multiple time patterns with different separators
+        time_patterns = [
+            r'\b([0-9]|1[0-5])[:;.]([0-5][0-9])\b',  # Standard time format
+            r'\b([0-9]|1[0-5])[:;.]([0-9][0-9])\b',   # Allow any two digits for minutes
+            r'\b(9|10|11|12|13|14|15)[:;.]([0-5][0-9])\b',  # Only valid hours
+            r'\b([0-9]{1,2})[:;.]([0-9]{2})\b',       # General pattern
+        ]
+        
+        for pattern in time_patterns:
+            matches = re.findall(pattern, text)
+            for hour, minute in matches:
+                try:
+                    h, m = int(hour), int(minute)
+                    if 9 <= h <= 15 and 0 <= m <= 59:
+                        time_str = f"{h};{m:02d}"
+                        found_times.append((time_str, result[0]))  # Include confidence/position
+                except ValueError:
+                    continue
+    
+    # Strategy 2: Look in concatenated text with character corrections
+    full_text = " ".join([res[1] for res in ocr_results])
+    corrected_text = full_text.upper()
+    
+    # Common OCR misreadings for digits
+    corrections = {
+        'O': '0', 'o': '0', 'Q': '0', 'D': '0',
+        'I': '1', 'l': '1', 'L': '1', '|': '1',
+        'Z': '2', 'z': '2',
+        'S': '5', 's': '5',
+        'G': '6', 'g': '6',
+        'T': '7', 't': '7',
+        'B': '8', 'b': '8',
+    }
+    
+    for wrong, right in corrections.items():
+        corrected_text = corrected_text.replace(wrong, right)
+    
+    # Apply time patterns to corrected text
+    time_patterns = [
+        r'\b([0-9]|1[0-5])[:;.]([0-5][0-9])\b',
+        r'\b(9|10|11|12|13|14|15)[:;.]([0-9]{2})\b',
+    ]
+    
+    for pattern in time_patterns:
+        matches = re.findall(pattern, corrected_text)
+        for hour, minute in matches:
+            try:
+                h, m = int(hour), int(minute)
+                if 9 <= h <= 15 and 0 <= m <= 59:
+                    time_str = f"{h};{m:02d}"
+                    found_times.append((time_str, 1.0))  # High confidence for corrected text
+            except ValueError:
+                continue
+    
+    # Strategy 3: Look for partial time patterns and try to reconstruct
+    # Look for patterns like "1 30" or "14 45" that might be times
+    number_pattern = r'\b([0-9]|1[0-5])\s+([0-5][0-9])\b'
+    matches = re.findall(number_pattern, corrected_text)
+    for hour, minute in matches:
+        try:
+            h, m = int(hour), int(minute)
+            if 9 <= h <= 15 and 0 <= m <= 59:
+                time_str = f"{h};{m:02d}"
+                found_times.append((time_str, 0.8))  # Medium confidence
+        except ValueError:
+            continue
+    
+    # Return the most confident time found
+    if found_times:
+        # Sort by confidence (second element in tuple)
+        found_times.sort(key=lambda x: x[1], reverse=True)
+        return found_times[0][0]
+    
+    return None
+
 def find_all_details(ocr_results, known_companies):
-    # This function is taken directly from the script you provided
     found_company, found_strike_num, found_option_type, found_time = None, None, None, None
 
     full_text = " ".join([res[1] for res in ocr_results])
     text_for_search = full_text.upper().replace('I', '1').replace('L', '1')
 
+    # Company detection
     for company_symbol in known_companies:
         if re.search(r'\b' + re.escape(company_symbol) + r'\b', text_for_search):
             found_company = company_symbol
             break 
 
+    # Strike and option type detection with better OCR corrections
+    corrected_text = text_for_search.replace('O', '0').replace('o', '0').replace('Q', '0')
     strike_pattern = r'(\d{3,6})[^A-Z]*(CE|PE)'
-    strike_match = re.search(strike_pattern, text_for_search.replace('O', '0'))
+    strike_match = re.search(strike_pattern, corrected_text)
     if strike_match:
         strike_raw = strike_match.group(1)
         if len(strike_raw) > 4 and strike_raw.endswith("00"):
@@ -58,11 +183,8 @@ def find_all_details(ocr_results, known_companies):
         found_strike_num = str(strike_int)
         found_option_type = strike_match.group(2)
 
-    time_pattern = r'(\d{1,2})[:;.](\d{2})'
-    time_match = re.search(time_pattern, text_for_search)
-    if time_match:
-        hour, minute = time_match.groups()
-        found_time = f"{hour};{minute}"
+    # Use advanced time extraction
+    found_time = extract_time_advanced(ocr_results)
 
     return found_company, found_strike_num, found_option_type, found_time
 
@@ -95,8 +217,18 @@ def main():
                 width, height = img.size
                 cropped_img = img.crop((0, height * CROP_TOP_PERCENT, width, height * (1 - CROP_BOTTOM_PERCENT)))
 
-            cropped_img_np = np.array(cropped_img)
-            results = reader.readtext(cropped_img_np, detail=1, paragraph=False)
+            # Enhance image for better OCR
+            enhanced_img = enhance_image_for_ocr(cropped_img)
+            
+            # First pass with enhanced image
+            results = reader.readtext(enhanced_img, detail=1, paragraph=False)
+            
+            # If no good results, try with original cropped image
+            if not results or len(results) < 3:
+                cropped_img_np = np.array(cropped_img)
+                results_backup = reader.readtext(cropped_img_np, detail=1, paragraph=False)
+                if len(results_backup) > len(results):
+                    results = results_backup
 
             company, strike_num, option_type, time_str = find_all_details(results, known_companies)
 
