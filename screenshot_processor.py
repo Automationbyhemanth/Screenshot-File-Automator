@@ -73,88 +73,186 @@ def enhance_image_for_ocr(img_array):
     
     return np.array(img)
 
+def fix_common_digit_errors(text):
+    """
+    Fix common OCR digit recognition errors
+    """
+    # More comprehensive digit corrections
+    corrections = {
+        # Zero corrections
+        'O': '0', 'o': '0', 'Q': '0', 'D': '0', 'U': '0', 'C': '0',
+        # One corrections
+        'I': '1', 'l': '1', 'L': '1', '|': '1', 'J': '1', 'i': '1',
+        # Two corrections
+        'Z': '2', 'z': '2', 'R': '2',
+        # Three corrections
+        'E': '3', 'e': '3',
+        # Four corrections
+        'A': '4', 'a': '4',
+        # Five corrections
+        'S': '5', 's': '5', 'G': '5',
+        # Six corrections
+        'G': '6', 'g': '6', 'b': '6',
+        # Seven corrections
+        'T': '7', 't': '7', '?': '7',
+        # Eight corrections
+        'B': '8', '8': '8',
+        # Nine corrections
+        'g': '9', 'q': '9',
+    }
+    
+    result = text
+    for wrong, right in corrections.items():
+        result = result.replace(wrong, right)
+    
+    return result
+
 def extract_time_advanced(ocr_results):
     """
     Advanced time extraction with multiple strategies
     """
     found_times = []
     
-    # Strategy 1: Look for time patterns in individual text blocks
+    # Strategy 1: Direct pattern matching in individual text blocks
     for result in ocr_results:
         text = result[1].upper().strip()
+        confidence = result[2] if len(result) > 2 else 0.5
+        
+        # Clean the text first
+        cleaned_text = fix_common_digit_errors(text)
         
         # Multiple time patterns with different separators
         time_patterns = [
             r'\b([0-9]|1[0-5])[:;.]([0-5][0-9])\b',  # Standard time format
             r'\b([0-9]|1[0-5])[:;.]([0-9][0-9])\b',   # Allow any two digits for minutes
             r'\b(9|10|11|12|13|14|15)[:;.]([0-5][0-9])\b',  # Only valid hours
-            r'\b([0-9]{1,2})[:;.]([0-9]{2})\b',       # General pattern
         ]
         
         for pattern in time_patterns:
-            matches = re.findall(pattern, text)
+            matches = re.findall(pattern, cleaned_text)
             for hour, minute in matches:
                 try:
                     h, m = int(hour), int(minute)
                     if 9 <= h <= 15 and 0 <= m <= 59:
                         time_str = f"{h};{m:02d}"
-                        found_times.append((time_str, result[0]))  # Include confidence/position
+                        found_times.append((time_str, confidence))
                 except ValueError:
                     continue
     
-    # Strategy 2: Look in concatenated text with character corrections
+    # Strategy 2: Fix problematic readings like "71;50" -> "11;50"
     full_text = " ".join([res[1] for res in ocr_results])
-    corrected_text = full_text.upper()
     
-    # Common OCR misreadings for digits
-    corrections = {
-        'O': '0', 'o': '0', 'Q': '0', 'D': '0',
-        'I': '1', 'l': '1', 'L': '1', '|': '1',
-        'Z': '2', 'z': '2',
-        'S': '5', 's': '5',
-        'G': '6', 'g': '6',
-        'T': '7', 't': '7',
-        'B': '8', 'b': '8',
-    }
+    # Look for patterns that might be misread times
+    problematic_patterns = [
+        r'\b([67])([01])[:;.]([0-5][0-9])\b',  # 71, 70, 61, 60 -> 11, 10, 11, 10
+        r'\b([789])([0-9])[:;.]([0-5][0-9])\b',  # 8x, 9x -> 1x
+        r'\b([0-9])([0-9])[:;.]([6-9][0-9])\b',  # xx:6x, xx:7x, xx:8x, xx:9x -> xx:0x, xx:1x
+    ]
     
-    for wrong, right in corrections.items():
-        corrected_text = corrected_text.replace(wrong, right)
+    for pattern in problematic_patterns:
+        matches = re.findall(pattern, full_text)
+        for match in matches:
+            try:
+                first_digit, second_digit, minute_part = match
+                
+                # Fix hour part
+                if first_digit in ['6', '7']:  # 6x, 7x -> 1x
+                    corrected_hour = '1' + second_digit
+                elif first_digit in ['8', '9']:  # 8x, 9x -> 1x  
+                    corrected_hour = '1' + second_digit
+                else:
+                    corrected_hour = first_digit + second_digit
+                
+                # Fix minute part - if minutes > 59, likely OCR error
+                minute_val = int(minute_part)
+                if minute_val >= 60:
+                    # Common errors: 60->00, 70->10, 80->30, 90->30
+                    if minute_part.startswith('6'):
+                        corrected_minute = '0' + minute_part[1]
+                    elif minute_part.startswith('7'):
+                        corrected_minute = '1' + minute_part[1]
+                    elif minute_part.startswith('8'):
+                        corrected_minute = '3' + minute_part[1]
+                    elif minute_part.startswith('9'):
+                        corrected_minute = '3' + minute_part[1]
+                    else:
+                        corrected_minute = minute_part
+                else:
+                    corrected_minute = minute_part
+                
+                h, m = int(corrected_hour), int(corrected_minute)
+                if 9 <= h <= 15 and 0 <= m <= 59:
+                    time_str = f"{h};{m:02d}"
+                    found_times.append((time_str, 0.7))  # Medium confidence for corrections
+            except (ValueError, IndexError):
+                continue
     
-    # Apply time patterns to corrected text
+    # Strategy 3: Character-by-character correction
+    corrected_full_text = fix_common_digit_errors(full_text.upper())
+    
     time_patterns = [
         r'\b([0-9]|1[0-5])[:;.]([0-5][0-9])\b',
         r'\b(9|10|11|12|13|14|15)[:;.]([0-9]{2})\b',
     ]
     
     for pattern in time_patterns:
-        matches = re.findall(pattern, corrected_text)
+        matches = re.findall(pattern, corrected_full_text)
         for hour, minute in matches:
             try:
                 h, m = int(hour), int(minute)
                 if 9 <= h <= 15 and 0 <= m <= 59:
                     time_str = f"{h};{m:02d}"
-                    found_times.append((time_str, 1.0))  # High confidence for corrected text
+                    found_times.append((time_str, 0.9))  # High confidence for corrected text
             except ValueError:
                 continue
     
-    # Strategy 3: Look for partial time patterns and try to reconstruct
-    # Look for patterns like "1 30" or "14 45" that might be times
+    # Strategy 4: Look for separated numbers that might be times
     number_pattern = r'\b([0-9]|1[0-5])\s+([0-5][0-9])\b'
-    matches = re.findall(number_pattern, corrected_text)
+    matches = re.findall(number_pattern, corrected_full_text)
     for hour, minute in matches:
         try:
             h, m = int(hour), int(minute)
             if 9 <= h <= 15 and 0 <= m <= 59:
                 time_str = f"{h};{m:02d}"
-                found_times.append((time_str, 0.8))  # Medium confidence
+                found_times.append((time_str, 0.6))  # Lower confidence for separated numbers
         except ValueError:
             continue
     
+    # Strategy 5: Try to fix specific known bad readings
+    # Handle cases like "71;50" where 7 should be 1
+    bad_reading_fixes = [
+        (r'\b7([0-5])[:;.]([0-5][0-9])\b', r'1\1;\2'),  # 71:50 -> 11:50
+        (r'\b6([0-5])[:;.]([0-5][0-9])\b', r'1\1;\2'),  # 61:30 -> 11:30
+        (r'\b([0-9]|1[0-5])[:;.]7([0-9])\b', r'\1;1\2'),  # 10:70 -> 10:10
+        (r'\b([0-9]|1[0-5])[:;.]6([0-9])\b', r'\1;0\2'),  # 10:60 -> 10:00
+    ]
+    
+    for bad_pattern, fix_pattern in bad_reading_fixes:
+        fixed_text = re.sub(bad_pattern, fix_pattern, full_text)
+        if fixed_text != full_text:
+            # Look for valid times in the fixed text
+            time_pattern = r'\b([0-9]|1[0-5])[:;.]([0-5][0-9])\b'
+            matches = re.findall(time_pattern, fixed_text)
+            for hour, minute in matches:
+                try:
+                    h, m = int(hour), int(minute)
+                    if 9 <= h <= 15 and 0 <= m <= 59:
+                        time_str = f"{h};{m:02d}"
+                        found_times.append((time_str, 0.8))  # Good confidence for pattern fixes
+                except ValueError:
+                    continue
+    
     # Return the most confident time found
     if found_times:
-        # Sort by confidence (second element in tuple)
-        found_times.sort(key=lambda x: x[1], reverse=True)
-        return found_times[0][0]
+        # Remove duplicates
+        unique_times = {}
+        for time_str, confidence in found_times:
+            if time_str not in unique_times or unique_times[time_str] < confidence:
+                unique_times[time_str] = confidence
+        
+        # Sort by confidence
+        sorted_times = sorted(unique_times.items(), key=lambda x: x[1], reverse=True)
+        return sorted_times[0][0]
     
     return None
 
@@ -231,6 +329,12 @@ def main():
                     results = results_backup
 
             company, strike_num, option_type, time_str = find_all_details(results, known_companies)
+            
+            # Debug: Show what OCR detected
+            debug_text = " ".join([res[1] for res in results])
+            print(f"  🔍 OCR detected: '{debug_text[:100]}{'...' if len(debug_text) > 100 else ''}'")
+            if time_str:
+                print(f"  ⏰ Extracted time: '{time_str}'")
 
             if company and strike_num and option_type and time_str and is_valid_time(time_str):
                 # Create folder name in format: "Strike OptionType Company"
