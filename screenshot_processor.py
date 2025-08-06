@@ -5,6 +5,10 @@ import easyocr
 from PIL import Image
 import numpy as np
 from datetime import datetime
+import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import threading
+from functools import partial
 
 ### --- PART 1: CONFIGURATION --- ###
 print("\nInitializing EasyOCR... (This may take a moment on the first run)")
@@ -28,7 +32,10 @@ CROP_BOTTOM_PERCENT = 0.20
 
 # Performance optimization settings
 OCR_WIDTH_THRESHOLD = 1200  # Resize images wider than this for faster processing
-PARALLEL_PROCESSING = True  # Enable batch processing optimizations 
+PARALLEL_PROCESSING = True  # Enable batch processing optimizations
+CPU_CORES = 2  # Number of CPU cores to use
+CPU_THREADS = 4  # Number of threads to use
+BATCH_SIZE = 4  # Number of files to process in each batch 
 
 ### --- PART 2: THE VALIDATED LOGIC --- ###
 
@@ -322,6 +329,166 @@ def find_all_details(ocr_results, known_companies):
 
     return found_company, found_strike_num, found_option_type, found_time
 
+### --- PARALLEL PROCESSING FUNCTIONS --- ###
+
+def process_single_screenshot(args):
+    """
+    Process a single screenshot - designed for parallel execution
+    """
+    filename, fileDate, known_companies, reader_config = args
+    
+    # Initialize OCR reader for this process (each process needs its own)
+    try:
+        local_reader = easyocr.Reader(['en'], gpu=False, download_enabled=False)
+    except:
+        local_reader = easyocr.Reader(['en'], gpu=False)
+    
+    if not os.path.exists(filename):
+        return None, f"File {filename} not found"
+    
+    try:
+        # Process the image
+        with Image.open(filename) as img:
+            width, height = img.size
+            cropped_img = img.crop((0, height * CROP_TOP_PERCENT, width, height * (1 - CROP_BOTTOM_PERCENT)))
+
+        # CPU-optimized OCR processing
+        enhanced_img = enhance_image_for_ocr(cropped_img, fast_mode=True)
+        
+        # Optimized OCR settings for faster CPU processing
+        results = local_reader.readtext(
+            enhanced_img, 
+            detail=1, 
+            paragraph=False,
+            width_ths=0.7,
+            height_ths=0.7,
+            batch_size=1
+        )
+        
+        # If no good results, try with better quality
+        if not results or len(results) < 2:
+            enhanced_img_slow = enhance_image_for_ocr(cropped_img, fast_mode=False)
+            results_backup = local_reader.readtext(
+                enhanced_img_slow, 
+                detail=1, 
+                paragraph=False,
+                width_ths=0.5,
+                height_ths=0.5
+            )
+            if len(results_backup) > len(results):
+                results = results_backup
+
+        # Extract information
+        company, strike_num, option_type, time_str = find_all_details(results, known_companies)
+        
+        # Debug info
+        debug_text = " ".join([res[1] for res in results])
+        
+        return {
+            'filename': filename,
+            'company': company,
+            'strike_num': strike_num,
+            'option_type': option_type,
+            'time_str': time_str,
+            'debug_text': debug_text,
+            'success': True
+        }, None
+        
+    except Exception as e:
+        return None, f"Error processing {filename}: {str(e)}"
+
+def process_batch_parallel(filenames, fileDate, known_companies):
+    """
+    Process a batch of screenshots in parallel using 2 cores and 4 threads
+    """
+    results = []
+    
+    # Prepare arguments for parallel processing
+    process_args = [(filename, fileDate, known_companies, None) for filename in filenames]
+    
+    # Use ProcessPoolExecutor for CPU-intensive OCR work
+    with ProcessPoolExecutor(max_workers=CPU_CORES) as process_executor:
+        # Submit all jobs
+        future_to_filename = {
+            process_executor.submit(process_single_screenshot, args): args[0] 
+            for args in process_args
+        }
+        
+        # Collect results as they complete
+        for future in future_to_filename:
+            filename = future_to_filename[future]
+            try:
+                result, error = future.result(timeout=60)  # 60 second timeout per file
+                if result:
+                    results.append(result)
+                else:
+                    results.append({
+                        'filename': filename,
+                        'success': False,
+                        'error': error
+                    })
+            except Exception as e:
+                results.append({
+                    'filename': filename,
+                    'success': False,
+                    'error': f"Processing timeout or error: {str(e)}"
+                })
+    
+    return results
+
+def move_file_threaded(file_info, fileDate):
+    """
+    Move processed file to appropriate folder - designed for threading
+    """
+    try:
+        filename = file_info['filename']
+        company = file_info['company']
+        strike_num = file_info['strike_num']
+        option_type = file_info['option_type']
+        time_str = file_info['time_str']
+        
+        if company and strike_num and option_type and time_str and is_valid_time(time_str):
+            # Create folder name
+            folder_name = f"{strike_num} {option_type} {company}"
+            
+            # Thread-safe folder creation
+            with threading.Lock():
+                if not os.path.exists(folder_name):
+                    os.makedirs(folder_name)
+                    print(f"  📁 Created folder: '{folder_name}'")
+            
+            # Create filename and full path
+            new_filename = f"{fileDate} {company} {strike_num} {option_type} {time_str}.png"
+            full_path = os.path.join(folder_name, new_filename)
+            
+            if not os.path.exists(full_path):
+                os.rename(filename, full_path)
+                return f"✅ SUCCESS: Moved to '{folder_name}/{new_filename}'"
+            else:
+                print(f"  🔄 DUPLICATE FOUND: Exact duplicate exists in '{folder_name}'.")
+                print(f"  🗑️ DELETING OLD FILE: Removing existing '{new_filename}'")
+                os.remove(full_path)
+                os.rename(filename, full_path)
+                return f"✅ SUCCESS: Kept newer file and moved to '{folder_name}/{new_filename}'"
+        else:
+            # Handle failed processing
+            fail_reason = []
+            if not company: fail_reason.append("Company")
+            if not strike_num or not option_type: fail_reason.append("Strike/Option")
+            if not time_str:
+                fail_reason.append("Time (not found)")
+            elif not is_valid_time(time_str):
+                fail_reason.append(f"Time (invalid value: '{time_str}')")
+            
+            try:
+                os.remove(filename)
+                return f"❌ MISREAD/INVALID: Could not find valid ({', '.join(fail_reason)}). DELETED '{filename}'"
+            except OSError as e:
+                return f"❌ Error deleting {filename}: {e}"
+                
+    except Exception as e:
+        return f"❌ Error moving {filename}: {e}"
+
 ### --- MAIN EXECUTION BLOCK --- ###
 def main():
     print("\n--- Automated Batch Processor ---")
@@ -344,107 +511,55 @@ def main():
         input("Press Enter to exit."); return
 
     print(f"Found {len(files_to_process)} files to process.")
+    print(f"🚀 Using {CPU_CORES} CPU cores with {CPU_THREADS} threads for parallel processing")
     
-    # CPU optimization: Process with progress tracking
+    # Process files in batches for parallel processing
     processed_count = 0
     start_time = datetime.now()
     
-    for i, filename in enumerate(files_to_process, 1):
-        if not os.path.exists(filename): continue
-        print(f"Processing '{filename}'...")
-        try:
-            with Image.open(filename) as img:
-                width, height = img.size
-                cropped_img = img.crop((0, height * CROP_TOP_PERCENT, width, height * (1 - CROP_BOTTOM_PERCENT)))
-
-            # CPU-optimized OCR processing
-            enhanced_img = enhance_image_for_ocr(cropped_img, fast_mode=True)
-            
-            # Optimized OCR settings for faster CPU processing
-            results = reader.readtext(
-                enhanced_img, 
-                detail=1, 
-                paragraph=False,
-                width_ths=0.7,  # Faster text detection
-                height_ths=0.7,  # Faster text detection
-                batch_size=1    # Optimize for single image processing
-            )
-            
-            # If no good results and we have time, try with better quality
-            if not results or len(results) < 2:
-                enhanced_img_slow = enhance_image_for_ocr(cropped_img, fast_mode=False)
-                results_backup = reader.readtext(
-                    enhanced_img_slow, 
-                    detail=1, 
-                    paragraph=False,
-                    width_ths=0.5,  # More thorough detection
-                    height_ths=0.5
-                )
-                if len(results_backup) > len(results):
-                    results = results_backup
-                    print(f"  🔄 Used high-quality mode for better results")
-
-            company, strike_num, option_type, time_str = find_all_details(results, known_companies)
-            
-            # Debug: Show what OCR detected
-            debug_text = " ".join([res[1] for res in results])
-            print(f"  🔍 OCR detected: '{debug_text[:100]}{'...' if len(debug_text) > 100 else ''}'")
-            if time_str:
-                print(f"  ⏰ Extracted time: '{time_str}'")
-
-            if company and strike_num and option_type and time_str and is_valid_time(time_str):
-                # Create folder name in format: "Strike OptionType Company"
-                folder_name = f"{strike_num} {option_type} {company}"
-                
-                # Create the folder if it doesn't exist
-                if not os.path.exists(folder_name):
-                    os.makedirs(folder_name)
-                    print(f"  📁 Created folder: '{folder_name}'")
-                
-                # Create filename and full path
-                new_filename = f"{fileDate} {company} {strike_num} {option_type} {time_str}.png"
-                full_path = os.path.join(folder_name, new_filename)
-                
-                if not os.path.exists(full_path):
-                    os.rename(filename, full_path)
-                    print(f"  ✅ SUCCESS: Moved to '{folder_name}/{new_filename}'")
-                else:
-                    try:
-                        print(f"  🔄 DUPLICATE FOUND: Exact duplicate exists in '{folder_name}'.")
-                        print(f"  🗑️ DELETING OLD FILE: Removing existing '{new_filename}'")
-                        os.remove(full_path)  # Delete the old file first
-                        os.rename(filename, full_path)  # Move the new file
-                        print(f"  ✅ SUCCESS: Kept newer file and moved to '{folder_name}/{new_filename}'")
-                    except OSError as e:
-                        print(f"    - Error during replacement: {e}")
-            else:
-                fail_reason = []
-                if not company: fail_reason.append("Company")
-                if not strike_num or not option_type: fail_reason.append("Strike/Option")
-                if not time_str:
-                    fail_reason.append("Time (not found)")
-                elif not is_valid_time(time_str):
-                    fail_reason.append(f"Time (invalid value: '{time_str}')")
-                
-                print(f"  ❌ MISREAD/INVALID: Could not find valid ({', '.join(fail_reason)}).")
-                try:
-                    os.remove(filename)
-                    print(f"  - DELETED '{filename}' because it was unreadable or contained invalid data.")
-                except OSError as e:
-                    print(f"    - Error while deleting misread file: {e}")
-
-        except Exception as e:
-            print(f"  ❌ ERROR: An unexpected error occurred: {e}")
+    # Split files into batches
+    batches = [files_to_process[i:i + BATCH_SIZE] for i in range(0, len(files_to_process), BATCH_SIZE)]
+    
+    for batch_num, batch_files in enumerate(batches, 1):
+        print(f"\n🔄 Processing Batch {batch_num}/{len(batches)} ({len(batch_files)} files)")
         
-        # Progress tracking for performance monitoring
-        processed_count += 1
+        # Process batch in parallel (OCR processing)
+        batch_results = process_batch_parallel(batch_files, fileDate, known_companies)
+        
+        # Move files using threading (I/O operations)
+        move_tasks = []
+        with ThreadPoolExecutor(max_workers=CPU_THREADS) as thread_executor:
+            for result in batch_results:
+                if result['success']:
+                    # Show OCR debug info
+                    debug_text = result.get('debug_text', '')
+                    print(f"  🔍 {result['filename']}: '{debug_text[:60]}{'...' if len(debug_text) > 60 else ''}'")
+                    if result.get('time_str'):
+                        print(f"    ⏰ Extracted time: '{result['time_str']}'")
+                    
+                    # Submit file moving task
+                    future = thread_executor.submit(move_file_threaded, result, fileDate)
+                    move_tasks.append((future, result['filename']))
+                else:
+                    print(f"  ❌ {result['filename']}: {result.get('error', 'Unknown error')}")
+            
+            # Collect file moving results
+            for future, filename in move_tasks:
+                try:
+                    move_result = future.result(timeout=30)
+                    print(f"  {move_result}")
+                except Exception as e:
+                    print(f"  ❌ Error moving {filename}: {e}")
+        
+        # Update progress
+        processed_count += len(batch_files)
         elapsed_time = (datetime.now() - start_time).total_seconds()
         avg_time_per_file = elapsed_time / processed_count
         remaining_files = len(files_to_process) - processed_count
         estimated_remaining = remaining_files * avg_time_per_file
         
-        print(f"  📊 Progress: {processed_count}/{len(files_to_process)} ({processed_count/len(files_to_process)*100:.1f}%) | "
-              f"Avg: {avg_time_per_file:.1f}s/file | ETA: {estimated_remaining:.0f}s")
+        print(f"📊 Batch {batch_num} Complete | Overall Progress: {processed_count}/{len(files_to_process)} ({processed_count/len(files_to_process)*100:.1f}%)")
+        print(f"⚡ Avg Speed: {avg_time_per_file:.1f}s/file | ETA: {estimated_remaining:.0f}s remaining")
 
     total_time = (datetime.now() - start_time).total_seconds()
     print(f"\n--- All files processed in {total_time:.1f} seconds ---")
@@ -452,4 +567,6 @@ def main():
     input("Press Enter to exit.")
 
 if __name__ == "__main__":
+    # Required for multiprocessing on Windows
+    mp.set_start_method('spawn', force=True)
     main()

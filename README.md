@@ -11,6 +11,8 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 - **OCR Error Correction**: Automatically corrects common OCR misreadings (O→0, I→1, etc.)
 - **Automated Renaming**: Renames files based on extracted information
 - **Auto Folder Organization**: Creates folders by strike/option/company and moves files accordingly
+- **Multi-Core Processing**: Uses 2 CPU cores and 4 threads for parallel processing
+- **Batch Processing**: Processes multiple files simultaneously for maximum speed
 - **Performance Monitoring**: Real-time progress tracking with ETA estimates
 - **GPU/CPU Support**: Automatically falls back to CPU with optimizations
 
@@ -80,6 +82,9 @@ python screenshot_processor.py
 ### Performance Settings
 - `OCR_WIDTH_THRESHOLD = 1200` (resizes images wider than 1200px for faster processing)
 - `PARALLEL_PROCESSING = True` (enables batch processing optimizations)
+- `CPU_CORES = 2` (number of CPU cores to use for parallel OCR processing)
+- `CPU_THREADS = 4` (number of threads for file I/O operations)
+- `BATCH_SIZE = 4` (number of files processed simultaneously per batch)
 
 ### Time Validation
 - Only accepts times between 9:00 and 15:59 (trading hours)
