@@ -74,15 +74,6 @@ python screenshot_processor.py
 - Duplicate files are replaced with newer versions
 - Comprehensive error logging for troubleshooting
 
-## Building Executable
-
-To create a standalone executable with PyInstaller:
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile --add-data "companies.txt;." screenshot_processor.py
-```
-
 ## Troubleshooting
 
 1. **GPU Issues**: Script automatically falls back to CPU if GPU initialization fails

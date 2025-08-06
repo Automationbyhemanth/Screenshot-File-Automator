@@ -8,17 +8,6 @@ from datetime import datetime
 
 # --- REMOVED LICENSE VERIFICATION LIBRARIES ---
 
-### --- RESOURCE PATH HELPER (for making the script an executable .exe) --- ###
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-### --- LICENSE VERIFICATION REMOVED --- ###
-
 ### --- PART 1: CONFIGURATION --- ###
 print("\nInitializing EasyOCR... (This may take a moment on the first run)")
 try:
