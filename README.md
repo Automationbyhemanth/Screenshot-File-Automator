@@ -1,25 +1,117 @@
-# Automated Screenshot Renaming Tool
+# Screenshot Processor
 
-This is a Python script designed to solve a real-world automation problem: automatically renaming a large batch of screenshot files based on content found within the images themselves. This tool was built to streamline the process of archiving daily screenshots from a trading platform.
+An automated batch processor for screenshot files that uses OCR (Optical Character Recognition) to extract trading information and rename files accordingly.
 
-## The Problem
+## Features
 
-Manually renaming dozens or hundreds of screenshots every day is a time-consuming and error-prone task. The core challenge was that the key piece of information (the time) appeared at a different location in every screenshot, making simple automation impossible. Furthermore, the OCR (Optical Character Recognition) was often confused by other numbers on the screen, like the time on the Windows Taskbar or the time-axis of the chart.
+- **License Verification**: Secure license checking via Google Sheets
+- **OCR Processing**: Uses EasyOCR for text extraction from screenshots
+- **Intelligent Parsing**: Extracts company symbols, strike prices, option types, and timestamps
+- **Automated Renaming**: Renames files based on extracted information
+- **Batch Processing**: Processes multiple screenshots at once
+- **GPU/CPU Support**: Automatically falls back to CPU if GPU is unavailable
 
-## The Solution
+## Requirements
 
-This script implements a robust, multi-step strategy to achieve pure automation:
+- Python 3.7+
+- Required Python packages (see `requirements.txt`)
+- Google Service Account credentials (`Screenshot-access.json`)
+- Company symbols list (`companies.txt`)
 
-1.  **Aggressive Cropping:** The script first programmatically crops the top and bottom sections of each screenshot. This intelligently removes all "noise" like browser tabs and the taskbar, forcing the OCR to focus only on the main chart area.
-2.  **Powerful OCR Engine:** It utilizes the **EasyOCR** library, a deep learning-based OCR engine, for its superior accuracy in reading text from complex images like software user interfaces.
-3.  **Intelligent Parsing:** The script searches the clean OCR output for the first text block that matches a time-like pattern (e.g., HH:MM, HH.MM, or HH;MM).
-4.  **Automated Renaming:** Finally, it uses this extracted time, along with user-provided details (Date, Company, Strike Price), to rename the file into a consistent, organized format.
+## Installation
 
-## Skills Demonstrated
+1. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-This project showcases the following key skills:
+2. Set up Google Sheets API:
+   - Create a Google Service Account
+   - Download the JSON credentials file
+   - Rename it to `Screenshot-access.json`
+   - Place it in the same directory as the script
 
--   **Problem Solving & Debugging:** Iteratively diagnosed and solved multiple points of failure, from incorrect OCR readings to fundamental strategy flaws.
--   **Python Scripting:** Wrote a clean, reusable Python script to handle file system operations and process images.
--   **Computer Vision & OCR:** Successfully implemented and configured the EasyOCR library to extract specific data from images.
--   **Process Automation:** Created a tool that transforms a tedious manual workflow into a fully automated, "one-click" solution.
+3. Create a Google Sheet named "Screenshot License Access" with columns:
+   - Name
+   - Email
+   - License Key
+
+4. Share the Google Sheet with the client_email from your JSON credentials file
+
+## Usage
+
+1. Place screenshot files (PNG, JPG, JPEG) starting with "Screenshot" in the same directory
+2. Ensure `companies.txt` contains the stock symbols you want to detect
+3. Run the script:
+```bash
+python screenshot_processor.py
+```
+
+4. Follow the prompts:
+   - Enter your license credentials
+   - Enter the date for the batch processing
+   - The script will process all screenshot files automatically
+
+## File Structure
+
+```
+├── screenshot_processor.py    # Main script
+├── requirements.txt          # Python dependencies
+├── companies.txt            # List of company symbols to detect
+├── Screenshot-access.json   # Google API credentials (you need to create this)
+└── README.md               # This file
+```
+
+## How It Works
+
+1. **License Verification**: Connects to Google Sheets to verify user credentials
+2. **Image Processing**: Crops screenshots to focus on relevant areas
+3. **OCR Extraction**: Uses EasyOCR to extract text from images
+4. **Pattern Matching**: Searches for:
+   - Company symbols (from `companies.txt`)
+   - Strike prices (3-6 digit numbers)
+   - Option types (CE/PE)
+   - Timestamps (HH:MM format between 9:00-15:59)
+5. **File Renaming**: Renames files to format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
+
+## Configuration
+
+### Cropping Settings
+- `CROP_TOP_PERCENT = 0.08` (crops top 8% of image)
+- `CROP_BOTTOM_PERCENT = 0.20` (crops bottom 20% of image)
+
+### Time Validation
+- Only accepts times between 9:00 and 15:59 (trading hours)
+- Rejects invalid OCR readings like "71:50"
+
+## Error Handling
+
+- Files that cannot be processed are automatically deleted
+- Duplicate files are replaced with newer versions
+- Comprehensive error logging for troubleshooting
+
+## Building Executable
+
+To create a standalone executable with PyInstaller:
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --add-data "Screenshot-access.json;." --add-data "companies.txt;." screenshot_processor.py
+```
+
+## Security Notes
+
+- License verification prevents unauthorized usage
+- Google API credentials should be kept secure
+- The script requires internet access for license verification
+
+## Troubleshooting
+
+1. **GPU Issues**: Script automatically falls back to CPU if GPU initialization fails
+2. **Missing Dependencies**: Install all packages from `requirements.txt`
+3. **Google Sheets Access**: Ensure the sheet is shared with your service account email
+4. **OCR Accuracy**: Adjust cropping percentages if OCR is missing information
+
+## Support
+
+For technical support or license issues, contact the script administrator.
