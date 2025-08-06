@@ -6,8 +6,6 @@ from PIL import Image
 import numpy as np
 from datetime import datetime
 
-# --- REMOVED LICENSE VERIFICATION LIBRARIES ---
-
 ### --- PART 1: CONFIGURATION --- ###
 print("\nInitializing EasyOCR... (This may take a moment on the first run)")
 try:
