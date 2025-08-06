@@ -7,6 +7,7 @@ An automated batch processor for screenshot files that uses OCR (Optical Charact
 - **OCR Processing**: Uses EasyOCR for text extraction from screenshots
 - **Intelligent Parsing**: Extracts company symbols, strike prices, option types, and timestamps
 - **Automated Renaming**: Renames files based on extracted information
+- **Auto Folder Organization**: Creates folders by strike/option/company and moves files accordingly
 - **Batch Processing**: Processes multiple screenshots at once
 - **GPU/CPU Support**: Automatically falls back to CPU if GPU is unavailable
 
@@ -44,7 +45,9 @@ python screenshot_processor.py
 ├── screenshot_processor.py    # Main script
 ├── requirements.txt          # Python dependencies
 ├── companies.txt            # List of company symbols to detect
-└── README.md               # This file
+├── README.md               # This file
+└── [Generated Folders]      # Auto-created folders like "400 PE PFC", "5100 CE ABB", etc.
+    ├── [Organized Screenshots]  # Screenshots moved to appropriate folders
 ```
 
 ## How It Works
@@ -56,7 +59,8 @@ python screenshot_processor.py
    - Strike prices (3-6 digit numbers)
    - Option types (CE/PE)
    - Timestamps (HH:MM format between 9:00-15:59)
-4. **File Renaming**: Renames files to format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
+4. **Folder Creation**: Creates folders named: `{Strike} {OptionType} {Company}` (e.g., "400 PE PFC", "5100 CE ABB")
+5. **File Organization**: Renames and moves files to appropriate folders with format: `{Date} {Company} {Strike} {OptionType} {Time}.png`
 
 ## Configuration
 

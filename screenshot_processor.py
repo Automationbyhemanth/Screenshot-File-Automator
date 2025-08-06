@@ -101,16 +101,27 @@ def main():
             company, strike_num, option_type, time_str = find_all_details(results, known_companies)
 
             if company and strike_num and option_type and time_str and is_valid_time(time_str):
+                # Create folder name in format: "Strike OptionType Company"
+                folder_name = f"{strike_num} {option_type} {company}"
+                
+                # Create the folder if it doesn't exist
+                if not os.path.exists(folder_name):
+                    os.makedirs(folder_name)
+                    print(f"  📁 Created folder: '{folder_name}'")
+                
+                # Create filename and full path
                 new_filename = f"{fileDate} {company} {strike_num} {option_type} {time_str}.png"
-                if not os.path.exists(new_filename):
-                    os.rename(filename, new_filename)
-                    print(f"  ✅ SUCCESS: Renamed to '{new_filename}'")
+                full_path = os.path.join(folder_name, new_filename)
+                
+                if not os.path.exists(full_path):
+                    os.rename(filename, full_path)
+                    print(f"  ✅ SUCCESS: Moved to '{folder_name}/{new_filename}'")
                 else:
                     try:
-                        print(f"  - INFO: Duplicate found. Replacing existing '{new_filename}' with this new screenshot.")
-                        os.remove(new_filename)
-                        os.rename(filename, new_filename)
-                        print(f"  ✅ SUCCESS: Replaced old file and renamed to '{new_filename}'")
+                        print(f"  - INFO: Duplicate found. Replacing existing file in '{folder_name}'.")
+                        os.remove(full_path)
+                        os.rename(filename, full_path)
+                        print(f"  ✅ SUCCESS: Replaced old file and moved to '{folder_name}/{new_filename}'")
                     except OSError as e:
                         print(f"    - Error during replacement: {e}")
             else:
